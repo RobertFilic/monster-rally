@@ -1,0 +1,146 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Monster Rally</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bowlby+One&family=Barlow+Condensed:wght@500;700&display=swap">
+<style>
+  /* Layout: one full-screen game canvas; a dusty loading card sits over it until the race is ready. */
+  :root {
+    --bg: #1a110c;          /* canyon at dusk */
+    --panel: #2a1b13;
+    --sand: #f2c27a;        /* track dust */
+    --ink: #fbeee0;
+    --muted: #b9997f;
+    --curb: #e2392b;        /* red curb paint */
+    --display: "Bowlby One", "Arial Black", Impact, sans-serif;
+    --body: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    overflow: hidden;
+    padding-left: max(0px, env(safe-area-inset-left, 0px));
+    padding-right: max(0px, env(safe-area-inset-right, 0px));
+  }
+  #stage { position: relative; width: 100%; height: 100%; }
+  #game { display: block; width: 100%; height: 100%; background: var(--bg); touch-action: none; outline: none; }
+
+  #loader {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    padding-block: 24px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    background:
+      radial-gradient(120% 80% at 50% 110%, rgba(226, 57, 43, 0.25), transparent 60%),
+      var(--bg);
+  }
+  .card { width: min(520px, 100%); display: grid; gap: 14px; text-align: center; }
+  .logo {
+    font-family: var(--display); font-size: clamp(2.2rem, 8vw, 4rem); line-height: 0.95;
+    color: var(--sand); text-wrap: balance; letter-spacing: 0.01em;
+    text-shadow: 0 4px 0 rgba(0, 0, 0, 0.45);
+  }
+  .sub { font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase; color: var(--ink); font-size: 1rem; }
+  .bar { height: 14px; border-radius: 999px; background: var(--panel); overflow: hidden; border: 1px solid rgba(242, 194, 122, 0.25); }
+  .fill {
+    height: 100%; width: 0%;
+    background: repeating-linear-gradient(-45deg, var(--curb) 0 12px, var(--ink) 12px 24px);
+    transition: width 0.2s ease-out;
+  }
+  .status { color: var(--muted); font-size: 1.05rem; font-variant-numeric: tabular-nums; min-height: 1.4em; }
+  .tips { color: var(--muted); font-size: 0.98rem; line-height: 1.45; }
+  .tips b { color: var(--sand); font-weight: 700; }
+
+  #fs {
+    position: absolute;
+    top: calc(50% - 22px);
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    width: 44px; height: 44px; border-radius: 12px; border: 0;
+    background: rgba(26, 17, 12, 0.55); color: var(--ink); font: 700 1.2rem var(--body);
+    cursor: pointer;
+  }
+  #fs:focus-visible { outline: 2px solid var(--sand); outline-offset: 2px; }
+
+  #turn {
+    position: absolute; inset: 0; display: none; place-items: center; text-align: center;
+    background: rgba(26, 17, 12, 0.92); padding-inline: 24px;
+    font-family: var(--display); color: var(--sand); font-size: 1.6rem; line-height: 1.2;
+  }
+  #turn small { display: block; margin-top: 10px; font-family: var(--body); color: var(--ink); font-size: 1.05rem; letter-spacing: 0.06em; }
+  @media (orientation: portrait) and (pointer: coarse) { #turn { display: grid; } }
+  @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+</style>
+
+<div id="stage">
+  <canvas id="game" tabindex="-1" aria-label="Monster Rally game"></canvas>
+
+  <div id="loader">
+    <div class="card">
+      <div class="logo">MONSTER RALLY</div>
+      <div class="sub">Canyon Crush</div>
+      <div class="bar" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100"><div class="fill" id="fill"></div></div>
+      <div class="status" id="status">Warming up the engines…</div>
+      <div class="tips">
+        On a phone: <b>left thumb</b> steers, <b>right thumb</b> is gas, brake and nitro.<br>
+        On a computer: <b>WASD</b> or arrows to drive, <b>Space</b> for nitro, <b>R</b> to reset.
+      </div>
+    </div>
+  </div>
+
+  <button id="fs" type="button" aria-label="Full screen" hidden>⤢</button>
+
+  <div id="turn">Turn your phone sideways<small>The race is built for landscape.</small></div>
+</div>
+
+<script src="Build/WebGL.loader.js"></script>
+<script>
+  (function () {
+    var canvas = document.getElementById("game");
+    var fill = document.getElementById("fill");
+    var status = document.getElementById("status");
+    var loader = document.getElementById("loader");
+    var fs = document.getElementById("fs");
+
+    var config = {
+      dataUrl: "Build/data.wasm",
+      frameworkUrl: "Build/framework.wasm",
+      codeUrl: "Build/code.wasm",
+      streamingAssetsUrl: "StreamingAssets",
+      companyName: "MonsterRally",
+      productName: "Monster Rally",
+      productVersion: "0.1",
+      matchWebGLToCanvasSize: true,
+      devicePixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+    };
+
+    if (typeof createUnityInstance !== "function") {
+      status.textContent = "The game files didn't load. Reload the page to try again.";
+      return;
+    }
+
+    createUnityInstance(canvas, config, function (p) {
+      var pct = Math.round(p * 100);
+      fill.style.width = pct + "%";
+      fill.parentElement.setAttribute("aria-valuenow", String(pct));
+      status.textContent = pct < 100 ? "Loading the canyon… " + pct + "%" : "Building the track…";
+    }).then(function (instance) {
+      loader.hidden = true;
+      canvas.focus();
+      if (document.fullscreenEnabled) {
+        fs.hidden = false;
+        fs.addEventListener("click", function () {
+          try { instance.SetFullscreen(1); } catch (e) { /* not available here */ }
+        });
+      }
+    }).catch(function (err) {
+      status.textContent = "The race couldn't start: " + err;
+    });
+  })();
+</script>
